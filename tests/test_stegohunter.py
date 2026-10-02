@@ -17,11 +17,13 @@ import pytest
 # Ensure stegohunter is importable
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from stegohunter.analyzers import analyze_lsb, analyze_palette, find_appended_data, entropy
+from stegohunter.analyzers import analyze_lsb, analyze_palette, find_appended_data, analyze_jpeg_dct, entropy
+from stegohunter.analyzers.jpeg_dct import parse_jpeg_markers, westfeld_chi_square_jsteg, compute_block_dct
 from stegohunter.analyzers.common import byte_histogram
 from stegohunter.analyzers.lsb import _chi_square_uniform, _get_lsb_plane, _get_lsb_bytes
 from stegohunter.extractors import extract_lsb_message, extract_appended_data
 from stegohunter.audio import analyze_lsb_wav, extract_lsb_wav
+from stegohunter.visualizer import extract_bit_plane, generate_bitplane_grid, generate_spatial_heatmap, colormap_heatmap
 from stegohunter.orchestrator import full_analyze, is_image, is_audio
 
 
@@ -629,6 +631,173 @@ def test_e2e_appended_data():
         os.unlink(ext["output_path"])
     finally:
         os.unlink(p)
+
+
+# =========================================================================
+#  Tests: JPEG DCT frequency analysis & markers
+# =========================================================================
+
+def test_jpeg_dct_clean_image():
+    """Verify clean JPEG analysis produces clean verdict and computes DCT."""
+    raw = _make_test_image(64, 64, fmt="JPEG")
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+        f.write(raw)
+        p = f.name
+    try:
+        res = analyze_jpeg_dct(p)
+        assert res["is_jpeg"] is True
+        assert res["total_ac_coefficients"] > 0
+        assert res["suspicious"] is False
+        assert res["jsteg_detected"] is False
+        assert res["f5_detected"] is False
+        assert isinstance(res["blockiness"], float)
+    finally:
+        os.unlink(p)
+
+
+def test_jpeg_marker_parser():
+    """Verify JPEG marker parser finds SOI, DQT, and EOI."""
+    raw = _make_test_image(32, 32, fmt="JPEG")
+    markers = parse_jpeg_markers(raw)
+    assert markers["is_jpeg"] is True
+    assert markers["has_dqt"] is True
+    assert markers["eoi_offset"] > 0
+    marker_names = [m["marker"] for m in markers["markers"]]
+    assert "EOI" in marker_names
+    assert "DQT" in marker_names
+
+
+def test_jpeg_dct_comment_detection():
+    """Verify embedded JPEG COM marker comments are flagged."""
+    from PIL import Image
+    img = Image.new("RGB", (32, 32), color="blue")
+    buf = io.BytesIO()
+    # Insert comment in JPEG save
+    img.save(buf, format="JPEG", comment=b"FLAG{secret_comment_marker}")
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+        f.write(buf.getvalue())
+        p = f.name
+    try:
+        res = analyze_jpeg_dct(p)
+        assert res["is_jpeg"] is True
+        assert res["suspicious"] is True
+        assert any("comment" in r.lower() for r in res["reasons"])
+    finally:
+        os.unlink(p)
+
+
+def test_westfeld_chi_square_jsteg_detection():
+    """Simulate JSteg equalized pairs of values and test detection."""
+    import numpy as np
+    # Construct synthetic AC coefficients with equalized PoVs (2,3), (4,5), (6,7)...
+    coeffs = []
+    for k in range(1, 10):
+        # 100 counts of 2*k and 100 counts of 2*k + 1 (artificially equalized)
+        coeffs.extend([2 * k] * 100)
+        coeffs.extend([2 * k + 1] * 100)
+
+    chi2, p_val, active = westfeld_chi_square_jsteg(np.array(coeffs))
+    assert active >= 5
+    assert chi2 < 1e-4  # Perfectly equalized
+    assert p_val > 0.99  # Strong indicator of JSteg
+
+
+def test_orchestrator_jpeg_includes_dct():
+    """Verify full_analyze runs DCT analysis on JPEG files."""
+    raw = _make_test_image(32, 32, fmt="JPEG")
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+        f.write(raw)
+        p = f.name
+    try:
+        report = full_analyze(p)
+        modules = [f["module"] for f in report["findings"]]
+        assert "dct" in modules
+        assert "lsb" in modules
+        assert "palette" in modules
+    finally:
+        os.unlink(p)
+
+
+# =========================================================================
+#  Tests: Visualizer (bit-plane slicing, composite grid, heatmaps)
+# =========================================================================
+
+def test_visualizer_extract_bit_plane():
+    """Test bit-plane slicing returns high-contrast mask."""
+    raw = _make_test_image(32, 32, fmt="PNG")
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+        f.write(raw)
+        p = f.name
+    try:
+        plane_0 = extract_bit_plane(p, channel="R", bit=0)
+        assert plane_0.size == (32, 32)
+        assert plane_0.mode == "L"
+
+        plane_7 = extract_bit_plane(p, channel="R", bit=7)
+        assert plane_7.size == (32, 32)
+    finally:
+        os.unlink(p)
+
+
+def test_visualizer_grid():
+    """Test generating 2x4 composite bitplane comparison grid."""
+    raw = _make_test_image(32, 32, fmt="PNG")
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+        f.write(raw)
+        p = f.name
+    try:
+        grid = generate_bitplane_grid(p, channel="G")
+        assert grid.mode == "RGB"
+        assert grid.width > 200
+        assert grid.height > 100
+    finally:
+        os.unlink(p)
+
+
+def test_visualizer_spatial_heatmap():
+    """Test spatial anomaly heatmap generation and metrics calculation."""
+    msg = b"SECRET_HEATMAP_PAYLOAD_TESTING"
+    raw_stego = _embed_lsb_message(_make_test_image(64, 64), msg)
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+        f.write(raw_stego)
+        p = f.name
+    try:
+        heatmap_img, metrics = generate_spatial_heatmap(p, block_size=16, alpha=0.5)
+        assert heatmap_img.size == (64, 64)
+        assert "mean_anomaly_score" in metrics
+        assert "max_anomaly_score" in metrics
+        assert "hottest_region" in metrics
+        assert metrics["total_blocks"] == 16  # 4x4 blocks
+    finally:
+        os.unlink(p)
+
+
+def test_cli_visualize_command(tmp_path):
+    """Test CLI visualize subcommand for heatmap and bitplane output."""
+    from stegohunter.cli import main
+    raw = _make_test_image(32, 32, fmt="PNG")
+    img_path = str(tmp_path / "test.png")
+    out_heatmap = str(tmp_path / "out_heat.png")
+    with open(img_path, "wb") as f:
+        f.write(raw)
+
+    ret = main(["visualize", img_path, "-o", out_heatmap, "-m", "heatmap"])
+    assert ret == 0
+    assert os.path.exists(out_heatmap)
+
+
+def test_cli_dct_command(tmp_path, capsys):
+    """Test CLI dct subcommand output."""
+    from stegohunter.cli import main
+    raw = _make_test_image(32, 32, fmt="JPEG")
+    img_path = str(tmp_path / "test.jpg")
+    with open(img_path, "wb") as f:
+        f.write(raw)
+
+    ret = main(["dct", img_path])
+    assert ret == 0
+    captured = capsys.readouterr()
+    assert "total_ac_coefficients" in captured.out
 
 
 if __name__ == "__main__":

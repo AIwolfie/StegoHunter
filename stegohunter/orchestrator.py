@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from .analyzers import analyze_lsb, analyze_palette, find_appended_data
+from .analyzers import analyze_lsb, analyze_palette, find_appended_data, analyze_jpeg_dct
 from .audio import analyze_lsb_wav
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".webp"}
@@ -40,6 +40,19 @@ def full_analyze(path: str) -> dict:
         findings.append({"module": "palette", **analyze_palette(path)})
         suspicious_flags.append(findings[-1]["suspicious"])
         suspicious_flags.append(findings[-2]["suspicious"])
+
+        is_jpeg = ext in {".jpg", ".jpeg"}
+        if not is_jpeg:
+            try:
+                with open(path, "rb") as f:
+                    is_jpeg = f.read(2) == b"\xff\xd8"
+            except Exception:
+                pass
+
+        if is_jpeg:
+            dct_res = analyze_jpeg_dct(path)
+            findings.append({"module": "dct", **dct_res})
+            suspicious_flags.append(dct_res["suspicious"])
 
     elif ext in AUDIO_EXTS:
         findings.append({"module": "audio_lsb", **analyze_lsb_wav(path)})

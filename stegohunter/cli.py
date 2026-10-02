@@ -9,9 +9,10 @@ from typing import Optional
 
 from . import __version__
 from .orchestrator import full_analyze, is_image, is_audio
-from .analyzers import analyze_lsb, analyze_palette, find_appended_data
+from .analyzers import analyze_lsb, analyze_palette, find_appended_data, analyze_jpeg_dct
 from .extractors import extract_lsb_message, extract_appended_data
 from .audio import analyze_lsb_wav, extract_lsb_wav
+from .visualizer import extract_bit_plane, generate_bitplane_grid, generate_spatial_heatmap
 
 # ANSI colors
 GREEN = "\033[92m"
@@ -113,10 +114,27 @@ def cmd_analyze(args: argparse.Namespace) -> int:
                     print(f"  signatures:     ZIP")
             else:
                 print(f"  appended:       no")
+
+        elif mod == "dct":
+            print(f"  JSteg detected: {'YES' if finding['jsteg_detected'] else 'no'}")
+            print(f"  chi2 p-value:   {finding['jsteg_p_value']}")
+            print(f"  F5 zero ratio:  {finding['f5_zero_ratio']:.2%} ({'YES' if finding['f5_detected'] else 'normal'})")
+            print(f"  blockiness:     {finding['blockiness']:.4f}")
+            print(f"  AC LSB entropy: {finding['ac_lsb_entropy']} (ratio {finding['ac_lsb_ratio']})")
+            if finding.get("comments"):
+                print(f"  comments:       {finding['comments']}")
+            if finding.get("trailing_bytes"):
+                print(f"  trailing bytes: {finding['trailing_bytes']}")
+            for r in finding.get("reasons", []):
+                print(f"  - {r}")
+            status = "SUSPICIOUS" if finding["suspicious"] else "clean"
+            print(f"  status:         {_c(status, _verdict_color(status))}")
         print()
 
     if report["verdict"] == "HIDDEN DATA LIKELY":
         print(_c("  -> Run `stegohunter extract` to pull out the hidden data.", YELLOW))
+    if report["verdict"] in ("SUSPICIOUS", "HIDDEN DATA LIKELY") and report["type"] == "image":
+        print(_c("  -> Run `stegohunter visualize <image> -o heatmap.png` to inspect spatial anomalies.", CYAN))
     return 0 if report["verdict"] == "CLEAN" else 2
 
 
@@ -195,11 +213,66 @@ def cmd_extract_audio(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_visualize(args: argparse.Namespace) -> int:
+    if not is_image(args.file):
+        print(_c(f"[!] Visualization supports images only: {args.file}", RED))
+        return 1
+
+    mode = args.mode
+    out_path = args.output
+
+    if mode == "bitplane":
+        if out_path is None:
+            base = os.path.splitext(args.file)[0]
+            ch = args.channel.lower()
+            out_path = f"{base}_plane_{ch}_b{args.bit}.png"
+        img = extract_bit_plane(args.file, channel=args.channel, bit=args.bit)
+        img.save(out_path)
+        print(_c(f"[ARCHIVE: ONLINE — StegoHunter]", CYAN))
+        print(f"  mode:     bitplane")
+        print(f"  channel:  {args.channel.upper()}")
+        print(f"  bit:      {args.bit}")
+        print(f"  wrote:    {out_path}")
+
+    elif mode == "grid":
+        if out_path is None:
+            base = os.path.splitext(args.file)[0]
+            out_path = f"{base}_bitplanes_grid.png"
+        img = generate_bitplane_grid(args.file, channel=args.channel)
+        img.save(out_path)
+        print(_c(f"[ARCHIVE: ONLINE — StegoHunter]", CYAN))
+        print(f"  mode:     grid (bits 0-7)")
+        print(f"  channel:  {args.channel.upper()}")
+        print(f"  wrote:    {out_path}")
+
+    else:  # heatmap (default)
+        if out_path is None:
+            base = os.path.splitext(args.file)[0]
+            out_path = f"{base}_heatmap.png"
+        img, metrics = generate_spatial_heatmap(
+            args.file,
+            block_size=args.block_size,
+            channel=args.channel,
+            alpha=args.alpha,
+        )
+        img.save(out_path)
+        print(_c(f"[ARCHIVE: ONLINE — StegoHunter]", CYAN))
+        print(f"  mode:        heatmap")
+        print(f"  block size:  {metrics['block_size']}px")
+        print(f"  blocks:      {metrics['total_blocks']}")
+        print(f"  mean anomaly:{metrics['mean_anomaly_score']}")
+        print(f"  max anomaly: {metrics['max_anomaly_score']}")
+        print(f"  suspicious:  {metrics['suspicious_blocks_pct']}% blocks")
+        print(f"  wrote:       {out_path}")
+
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="stegohunter",
         description="Detect and extract hidden data from images and audio.",
-        epilog="Modules: LSB bit-plane analysis, palette analysis, appended-data scan, WAV audio LSB.",
+        epilog="Modules: LSB bit-plane analysis, palette analysis, appended-data scan, WAV audio LSB, JPEG DCT, visual heatmaps.",
     )
     parser.add_argument("--version", action="version", version=f"stegohunter {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -208,6 +281,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_analyze = sub.add_parser("analyze", help="Run full detection suite on a file")
     p_analyze.add_argument("file")
     p_analyze.set_defaults(func=cmd_analyze)
+
+    # visualize
+    p_viz = sub.add_parser("visualize", help="Generate spatial anomaly heatmap or bit-plane slices")
+    p_viz.add_argument("file")
+    p_viz.add_argument("-o", "--output", help="Output PNG path (default: <file>_heatmap.png)")
+    p_viz.add_argument("-m", "--mode", choices=["heatmap", "bitplane", "grid"], default="heatmap",
+                       help="Visualization mode (default: heatmap)")
+    p_viz.add_argument("-b", "--bit", type=int, default=0, help="Bit plane for bitplane mode (0-7)")
+    p_viz.add_argument("-c", "--channel", choices=["R", "G", "B", "all", "gray"], default="all",
+                       help="Color channel (default: all)")
+    p_viz.add_argument("--block-size", type=int, default=16, help="Block window size in pixels for heatmap")
+    p_viz.add_argument("--alpha", type=float, default=0.5,
+                       help="Heatmap overlay blend alpha: 0.0=heatmap only, 1.0=original only, 0.5=half blend")
+    p_viz.set_defaults(func=cmd_visualize)
 
     # extract-lsb
     p_lsb = sub.add_parser("extract-lsb", help="Extract LSB hidden message from an image")
@@ -238,6 +325,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_lsb_d = sub.add_parser("lsb", help="Run only LSB analysis")
     p_lsb_d.add_argument("file")
     p_lsb_d.set_defaults(func=lambda a: _dump_json(analyze_lsb(a.file)))
+
+    p_dct_d = sub.add_parser("dct", help="Run JPEG DCT frequency domain analysis")
+    p_dct_d.add_argument("file")
+    p_dct_d.set_defaults(func=lambda a: _dump_json(analyze_jpeg_dct(a.file)))
 
     p_pal = sub.add_parser("palette", help="Run only palette analysis")
     p_pal.add_argument("file")

@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stegohunter"
-version = "0.1.0"
-description = "Detect and extract hidden data from images and audio (LSB, palette, appended-data)"
+version = "0.2.0"
+description = "Detect and extract hidden data from images and audio (LSB, palette, appended-data, JPEG DCT, visual heatmaps)"
 readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "MIT" }
