@@ -9,16 +9,17 @@
 
 # StegoHunter
 
-**Detect, locate, and extract hidden data from images and audio.**
+**Detect, locate, crack, and extract hidden data from images and audio.**
 
 [![Python](https://img.shields.io/badge/Python-3.8%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-4B8BBE?style=flat-square)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-44%20passed-2ea44f?style=flat-square)](tests/test_stegohunter.py)
-[![Version](https://img.shields.io/badge/version-0.2.0-blue?style=flat-square)](pyproject.toml)
+[![Tests](https://img.shields.io/badge/tests-53%20passed-2ea44f?style=flat-square)](tests/test_stegohunter.py)
+[![Version](https://img.shields.io/badge/version-0.3.0-blue?style=flat-square)](pyproject.toml)
 
-A CLI steganalysis toolkit built for **OSINT**, **CTF**, and **digital forensics**.
-It hunts hidden payloads using **spatial localization heatmaps**, **JPEG DCT frequency domain analysis**,
-**LSB bit-plane slicing**, **palette analysis**, and **appended-data scanning** — across images and audio.
+An elite CLI and Web steganalysis toolkit built for **OSINT**, **CTF**, and **digital forensics**.
+It hunts hidden payloads using **mathematical embedding rate estimators (RS & SPA)**, **JPEG DCT frequency domain analysis**,
+**audio spectrogram waterfalls**, **spatial heatmaps**, **EXIF/metadata discrepancies**, **steghide/ZIP cracking**,
+and **automated batch triage with self-contained HTML forensic reports**.
 
 </div>
 
@@ -26,15 +27,17 @@ It hunts hidden payloads using **spatial localization heatmaps**, **JPEG DCT fre
 
 ## Features
 
-- 🗺️ **Visual Heatmaps & Bit-Plane Slicing** — generate spatial anomaly heatmaps (red/hot overlays) localizing exactly where payload bits are clustered; export individual bit-plane slices or 8-plane composite grids
-- 🌊 **JPEG DCT Frequency Domain Analysis** — parse discrete cosine transform coefficients from 8x8 blocks before decompression; detect **JSteg** (Westfeld Chi-Square PoV equalization), **F5** (shrinkage zero-inflation), and **OutGuess** (blockiness boundary discontinuity)
-- 🔍 **LSB Bit-Plane Analysis** — entropy, 0/1 ratio, and chi-square uniformity testing on every bit plane of RGB channels
-- 🎨 **Palette Analysis** — detects duplicate colors, palette gaps, non-zero padding, and skewed color-frequency distributions in indexed images
-- 📎 **Appended-Data Scanning** — finds bytes trailing the end-of-image marker and identifies embedded file signatures (ZIP, RAR, GZIP, PDF, PNG, JPEG, ELF…)
-- 🔊 **WAV Audio Analysis** — LSB entropy vs. MSB control comparison plus chi-square testing for 8/16/24/32-bit samples
-- 📦 **Message Extraction** — recovers length-prefixed and NULL-terminated payloads from images and audio
-- 📊 **Full-Pipeline Verdicts** — `CLEAN`, `SUSPICIOUS`, or `HIDDEN DATA LIKELY` with per-module evidence
-- 🎯 **JSON Output** for low-level modules — drop straight into your automated forensics pipelines
+- 📐 **RS Steganalysis & Sample Pair Analysis (SPA)** — mathematically estimates exact payload embedding rates (e.g. *14.8% in green channel*) and payload sizes in bytes without needing any header or length prefix
+- 🌊 **Audio Spectrogram & Frequency Waterfall** — converts audio into 2D Short-Time Fourier Transform (STFT) frequency waterfalls, revealing ultrasonic drawings, text, and Morse code hidden in inaudible frequencies
+- 🕵️ **EXIF, Metadata & Ghost Thumbnail Discrepancies** — inspects PNG ancillary chunks (`tEXt`, `zTXt`, `iTXt`), custom covert chunks, EXIF tag strings for base64/hex flags, and compares embedded EXIF preview thumbnails against displayed pictures to catch visual discrepancies
+- 🔓 **Multi-Threaded Stego Passphrase Cracker** — attacks encrypted stego carriers (appended ZIPs, Steghide, OutGuess, keyed LSB) using wordlists with high-speed multi-threading
+- 📂 **Recursive Batch Triage & Forensic HTML Reports** — sweeps entire folders across CPU cores and compiles self-contained, offline interactive HTML forensic exhibits
+- 🌐 **Interactive Web Lab (`stegohunter serve`)** — zero-install browser GUI featuring drag-and-drop analysis, StegSolve-style bit-plane cycling (bits 0–7, R/G/B/Alpha, Invert), real-time heatmap opacity sliders, and one-click payload downloads
+- 🗺️ **Visual Heatmaps & Bit-Plane Slicing** — generates localized spatial heatmaps highlighting where stego clusters are packed
+- ⚡ **JPEG DCT Frequency Steganalysis** — detects **JSteg** (Westfeld Chi-Square PoV equalization), **F5** (shrinkage zero-inflation), and **OutGuess** (boundary discontinuity) directly from 8x8 block quantized DCT tables
+- 🎨 **Palette Analysis** — audits duplicate colors, palette gaps, non-zero padding, and skewed color-frequency distributions in indexed images
+- 📎 **Appended-Data Scanning** — carves trailing bytes past true EOI/IEND markers and recognizes magic bytes (ZIP, RAR, GZIP, PDF, ELF, etc.)
+- 🔊 **WAV Audio LSB Analysis** — compares least-significant bit plane entropy against most-significant bit controls
 
 ---
 
@@ -45,7 +48,7 @@ It hunts hidden payloads using **spatial localization heatmaps**, **JPEG DCT fre
 git clone https://github.com/AIwolfie/StegoHunter.git
 cd StegoHunter
 
-# Install with development dependencies (includes pytest)
+# Install with development dependencies
 pip install -e ".[dev]"
 ```
 
@@ -53,7 +56,7 @@ Verify the install:
 
 ```bash
 stegohunter --version
-# stegohunter 0.2.0
+# stegohunter 0.3.0
 ```
 
 ### Dependencies
@@ -61,17 +64,17 @@ stegohunter --version
 | Package | Purpose |
 |---------|---------|
 | `Pillow` | Image loading, bit-plane manipulation, and visualization rendering |
-| `numpy` | High-performance array operations and 2D block DCT math |
+| `numpy` | Fast array operations, 2D block DCT math, and STFT audio processing |
 | `pytest` | Test suite (dev dependency) |
 
 ---
 
 ## Usage
 
-### 1. Full analysis pipeline
+### 1. Full Multi-Vector Analysis
 
 ```bash
-# Scan an image (PNG, JPEG, BMP, GIF, WebP...)
+# Scan an image
 stegohunter analyze target.jpg
 
 # Scan an audio file
@@ -92,13 +95,26 @@ stegohunter analyze target.wav
   MSB entropy:    0.9412  (control)
   status:         SUSPICIOUS
 
+  -- RS / SPA --
+  mean RS rate:   16.42%
+  mean SPA rate:  14.18%
+  channels:       R: 12.1%, G: 24.8%, B: 12.4%
+  est. payload:   4034 bytes
+  - RS Analysis: ~24.8% estimated LSB modification in G channel
+  status:         SUSPICIOUS
+
   -- DCT --
   JSteg detected: YES
   chi2 p-value:   0.998241
   F5 zero ratio:  82.14% (normal)
   blockiness:     1.1240
   AC LSB entropy: 0.9992 (ratio 0.4998)
-  - JSteg detected: DCT pairs equalized (chi2=2.15, p=0.9982, pairs=18)
+  status:         SUSPICIOUS
+
+  -- METADATA --
+  EXIF tags:      14
+  ghost thumbnail:YES (diff=31.40%)
+  - Ghost Thumbnail Discrepancy detected (diff=31.40%): embedded EXIF thumbnail diverges from displayed image
   status:         SUSPICIOUS
 
   -- APPENDED --
@@ -107,105 +123,130 @@ stegohunter analyze target.wav
   -> Run `stegohunter visualize <image> -o heatmap.png` to inspect spatial anomalies.
 ```
 
-### 2. Visual Heatmaps & Bit-Plane Visualization
+---
+
+### 2. Audio Spectrogram Waterfall
+
+Convert audio into a 2D frequency waterfall image to expose visual steganography hidden in high-frequency audio bands:
 
 ```bash
-# Generate a spatial anomaly heatmap overlay (suspicious blocks glow yellow/red)
+# Generate waterfall spectrogram (inferno colormap)
+stegohunter spectrogram audio.wav -o waterfall.png
+
+# Custom colormap & FFT resolution
+stegohunter spectrogram audio.wav -o waterfall.png --colormap cyber --fft 2048
+```
+
+---
+
+### 3. Stego Passphrase Cracker (`crack`)
+
+Dictionary attack on encrypted stego carriers using multi-threading:
+
+```bash
+# Crack using built-in high-probability passphrase list
+stegohunter crack suspicious.jpg
+
+# Crack using a custom wordlist (e.g. rockyou.txt) across 16 worker threads
+stegohunter crack suspicious.jpg -w /path/to/wordlist.txt --workers 16 -o decrypted_secret.bin
+```
+
+---
+
+### 4. Batch Directory Triage & HTML Reports (`triage`)
+
+Scan entire folders recursively and generate a standalone, offline interactive HTML forensic exhibit:
+
+```bash
+# Triage a directory and generate HTML forensic dashboard
+stegohunter triage ./evidence_directory/ -r --workers 8 --html triage_report.html
+
+# Also output machine-readable JSON
+stegohunter triage ./evidence_directory/ -r --json findings.json
+```
+
+---
+
+### 5. Interactive Browser Lab (`serve`)
+
+Launch the local web dashboard for point-and-click StegSolve bit-plane exploration:
+
+```bash
+stegohunter serve --port 8080
+```
+Open `http://127.0.0.1:8080` in any web browser to drag-and-drop images, toggle bit planes, adjust heatmap sliders, and download extracted payloads.
+
+---
+
+### 6. Visual Heatmaps & Bit-Plane Slicing (`visualize`)
+
+```bash
+# Spatial anomaly heatmap (suspicious clusters glow red)
 stegohunter visualize suspicious.png -o heatmap.png --mode heatmap --block-size 16 --alpha 0.5
 
-# Generate an 8-panel composite comparison grid (Bit 0 LSB through Bit 7 MSB)
-stegohunter visualize suspicious.png -o bitplanes.png --mode grid --channel R
+# 8-bitplane composite grid (Bits 0-7)
+stegohunter visualize suspicious.png -o bitgrid.png --mode grid
 
-# Extract a single high-contrast bit-plane slice (e.g. true LSB bit 0 of Blue channel)
-stegohunter visualize suspicious.png -o lsb_b0.png --mode bitplane --channel B --bit 0
+# High-contrast slice of a specific bit plane (e.g. Blue Channel Bit 0 LSB)
+stegohunter visualize suspicious.png -o slice.png --mode bitplane --channel B --bit 0
 ```
 
-### 3. Extraction
+---
+
+### 7. Extraction
 
 ```bash
-# Extract an LSB message from an image
+# Extract LSB message from image
 stegohunter extract-lsb image.png -o message.bin
 
-# Extract data appended after the end-of-image marker
+# Extract data appended past EOI marker
 stegohunter extract-appended image.jpg -o appended.bin
 
-# Extract an LSB message from WAV audio
+# Extract LSB payload from WAV audio
 stegohunter extract-audio audio.wav -o message.bin
-```
-
-### 4. Low-level modules (JSON output)
-
-```bash
-stegohunter dct image.jpg       # JPEG DCT frequency domain analysis
-stegohunter lsb image.png       # LSB analysis only
-stegohunter palette image.png   # Palette analysis only
-stegohunter appended file.bin   # Appended-data scan only
-stegohunter audio audio.wav     # WAV audio LSB analysis only
 ```
 
 ---
 
 ## Command Reference
 
-| Command | Description | Exit |
-|---------|-------------|------|
-| `analyze <file>` | Run the full detection suite and print a verdict | `0` clean · `2` suspicious |
+| Command | Description | Exit Code |
+|---------|-------------|:---------:|
+| `analyze <file>` | Run full detection suite across all modules | `0` clean · `2` suspicious |
 | `visualize <file>` | Generate spatial anomaly heatmap or bit-plane slices | `0` / `1` |
-| `extract-lsb <file>` | Extract a hidden LSB message from an image | `0` / `1` |
-| `extract-appended <file>` | Extract data appended after the EOI marker | `0` / `1` |
-| `extract-audio <file>` | Extract an LSB message from a WAV file | `0` / `1` |
+| `spectrogram <file>` | Generate audio frequency waterfall spectrogram PNG | `0` / `1` |
+| `crack <file>` | Multi-threaded dictionary attack on stego carriers | `0` / `1` |
+| `triage <dir>` | Batch sweep directory with HTML forensic reporting | `0` clean · `2` suspicious |
+| `serve` | Launch local interactive web lab / StegSolve GUI | `0` |
+| `extract-lsb <file>` | Extract hidden LSB message from an image | `0` / `1` |
+| `extract-appended <file>` | Extract data trailing the file marker | `0` / `1` |
+| `extract-audio <file>` | Extract LSB payload from WAV audio | `0` / `1` |
+| `rs <file>` | Mathematical RS & Sample Pair Analysis (JSON) | `0` |
+| `metadata <file>` | EXIF, PNG chunks, and Ghost Thumbnail analysis (JSON) | `0` |
 | `dct <file>` | JPEG DCT frequency domain analysis (JSON) | `0` |
 | `lsb <file>` | LSB bit-plane analysis (JSON) | `0` |
-| `palette <file>` | Palette analysis (JSON) | `0` |
-| `appended <file>` | Appended-data scan (JSON) | `0` |
-| `audio <file>` | WAV audio LSB analysis (JSON) | `0` |
-
-### `visualize` options
-
-| Flag | Description | Default |
-|------|-------------|---------|
-| `-o, --output` | Output image path | `<file>_heatmap.png` |
-| `-m, --mode` | Visualization mode: `heatmap`, `bitplane`, `grid` | `heatmap` |
-| `-b, --bit` | Bit plane index (`0`=LSB to `7`=MSB) | `0` |
-| `-c, --channel` | Channel: `R`, `G`, `B`, `all`, `gray` | `all` |
-| `--block-size` | Block window size in pixels for heatmap | `16` |
-| `--alpha` | Overlay blend alpha (`0.0`=heatmap only, `1.0`=original, `0.5`=50% blend) | `0.5` |
+| `palette <file>` | Palette covert channel analysis (JSON) | `0` |
+| `appended <file>` | Appended data scan (JSON) | `0` |
+| `audio <file>` | WAV audio bit-plane analysis (JSON) | `0` |
 
 ---
 
-## Detection & Forensics Architecture
+## Architecture & Detection Theory
 
-### 1. Spatial Localization Heatmaps (`visualize`)
-Standard analysis outputs a number (e.g. "suspicious entropy 0.99"). StegoHunter breaks the image into sliding blocks, measures local LSB entropy and 0/1 bit deviation, and renders a color-coded heatmap (Deep Blue $\to$ Cyan $\to$ Green $\to$ Yellow $\to$ Crimson Red). Blocks packed with stego payloads glow red, highlighting watermarks, hidden QR codes, or rectangular stego fields visually.
+### 1. RS Steganalysis & Sample Pair Analysis (Fridrich / Dumitrescu)
+Detects randomly-scattered LSB stego with mathematical precision. By grouping pixels into non-overlapping groups and computing flipping operations $F_1$ and $F_{-1}$, the algorithm analyzes the divergence between regular ($R_M$) and singular ($S_M$) groups to solve for the exact percentage of modified pixels without requiring any length header.
 
-### 2. JPEG DCT Frequency Domain Analysis (`dct`)
-Tools like JSteg, F5, and OutGuess embed secrets in the mathematical frequency domain (quantized AC DCT coefficients) rather than raw pixels.
-- **JSteg Detection:** Westfeld Chi-Square on Pairs of Values (PoVs). JSteg balances pairs $(2k, 2k+1)$, causing the chi-square $p$-value to spike toward $1.0$.
-- **F5 Detection:** F5 uses matrix embedding with shrinkage, driving non-zero coefficients toward zero. StegoHunter catches the resulting zero-bin inflation and histogram asymmetry.
-- **OutGuess Detection:** Computes inter-block vs. intra-block boundary discontinuity (blockiness calibration) across 8x8 DCT grid edges.
-- **Marker Inspection:** Scans raw binary segments for hidden `COM` comment strings and non-standard `APP` payloads.
+### 2. Frequency Domain (JPEG DCT)
+Inspects quantized frequency coefficients directly from 8x8 block tables.
+- **JSteg:** Westfeld Chi-Square tests equality of frequency value pairs $(2k, 2k+1)$.
+- **F5:** Identifies coefficient shrinkage toward zero (zero-bin inflation).
+- **OutGuess:** Measures 8x8 block boundary discontinuity across grid edges.
 
-### 3. LSB Bit-Plane Analysis (`lsb`)
-Tests RGB bit planes for 4-byte length-prefix headers followed by ASCII payloads, low entropy in natural images, and chi-square distribution anomalies.
+### 3. Audio Waterfall Spectrograms
+Calculates Short-Time Fourier Transform (STFT) magnitude in decibels and applies perceptual colormaps to expose hidden drawings or text modulated into audio frequencies.
 
-### 4. Palette Covert-Channel Analysis (`palette`)
-Finds hidden data in indexed images (GIF, palette-PNG) by auditing color duplication, unreferenced palette gaps, non-zero trailing padding, and skewed color-frequency distributions.
-
-### 5. Appended-Data Scanning (`appended`)
-Locates the true End-Of-Image (EOI) marker and scans all bytes beyond it, recognizing magic bytes for ZIP, RAR, GZIP, BZ2, XZ, PDF, PNG, JPEG, ELF, and ZSTD.
-
-### 6. Audio LSB Forensics (`audio`)
-Evaluates WAV audio bit streams by contrasting the noise characteristics of least-significant bit planes against most-significant bit controls.
-
----
-
-## Exit Codes
-
-| Code | Meaning |
-|------|---------|
-| `0` | Analysis complete — file is clean |
-| `2` | Analysis complete — suspicious / hidden data likely |
-| `1` | Error (file not found, unsupported type, extraction failed) |
+### 4. Metadata & Ghost Thumbnail Discrepancies
+Audits auxiliary PNG chunks (`tEXt`, `zTXt`, `iTXt`), decodes base64/hex in EXIF tags, and flags instances where an embedded preview thumbnail differs from the main image.
 
 ---
 
@@ -215,23 +256,30 @@ Evaluates WAV audio bit streams by contrasting the noise characteristics of leas
 stegohunter/
 ├── stegohunter/
 │   ├── __init__.py
-│   ├── cli.py                 # CLI interface & subcommands
-│   ├── orchestrator.py        # Multi-module pipeline orchestrator
-│   ├── visualizer.py          # Spatial heatmaps, bit-plane slicing, grid
+│   ├── cli.py                 # Unified CLI interface
+│   ├── orchestrator.py        # Multi-vector pipeline orchestrator
+│   ├── visualizer.py          # Spatial heatmaps, bit-plane slicing & grids
+│   ├── cracker.py             # Multi-threaded passphrase cracker
+│   ├── triage.py              # Batch directory scanner
+│   ├── reporting.py           # Self-contained HTML report compiler
+│   ├── server.py              # Interactive web lab & StegSolve GUI
 │   ├── analyzers/
 │   │   ├── lsb.py             # LSB bit-plane analysis
+│   │   ├── rs.py              # RS & Sample Pair Analysis (SPA)
 │   │   ├── jpeg_dct.py        # JPEG DCT frequency & marker analysis
-│   │   ├── palette.py         # Palette covert-channel detection
-│   │   ├── appended.py        # Appended-data scanning
-│   │   └── common.py          # Shared utilities (entropy, histograms)
+│   │   ├── metadata.py        # EXIF, PNG chunks & Ghost Thumbnails
+│   │   ├── palette.py         # Palette covert channel detection
+│   │   ├── appended.py        # Appended data scanning
+│   │   └── common.py          # Entropy & histogram utilities
 │   ├── audio/
-│   │   └── wav.py             # WAV audio LSB analysis & extraction
+│   │   ├── wav.py             # WAV LSB analysis & extraction
+│   │   └── spectrogram.py     # STFT audio waterfall spectrogram generator
 │   └── extractors/
 │       ├── lsb.py             # Image LSB message extraction
-│       └── appended.py        # Appended-data extraction
+│       └── appended.py        # Appended data extraction
 ├── tests/
-│   └── test_stegohunter.py    # 44 self-contained tests
-├── pyproject.toml             # Packaging and dependencies
+│   └── test_stegohunter.py    # 53 self-contained automated tests
+├── pyproject.toml             # Packaging, dependencies & entry point
 └── README.md
 ```
 
@@ -239,14 +287,11 @@ stegohunter/
 
 ## Testing
 
-The test suite **generates its own clean and stego samples** and verifies detection and extraction round-trip correctness:
-
 ```bash
 pytest tests/ -v
 ```
 
-Coverage:
-- 44 tests covering spatial LSB, JPEG DCT (JSteg, F5, OutGuess, markers), visual heatmaps, bit-plane grids, palette covert channels, appended files, WAV audio, orchestrator pipeline, and CLI subcommands.
+All 53 tests run self-contained sample generators verifying detection, extraction, math models, cracking, triage, and web server endpoints without external fixtures.
 
 ---
 
